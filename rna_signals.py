@@ -122,8 +122,8 @@ for file in tqdm(coverage_files, desc="File"):
     minus_df = pd.DataFrame(minus_rna_df_list)
 
     df.to_csv("./REU/RNA-Signal_csv/{file_name}.csv")
-    plus_df.to_csv(f"./REU/Plus-Minus-RNA_csv/GM12878.minus.ENCFF074SXQ.plus.csv")
-    minus_df.to_csv(f"./REU/Plus-Minus-RNA_csv/GM12878.minus.ENCFF074SXQ.minus.csv")
+    plus_df.to_csv(f"./REU/Plus-Minus-RNA_csv/{file_name}.plus.csv")
+    minus_df.to_csv(f"./REU/Plus-Minus-RNA_csv/{file_name}.minus.csv")
 
     # Plotting the average RNA signal for the entire file.
     plt.plot(df.columns, df.mean())
@@ -144,7 +144,7 @@ for file in tqdm(coverage_files, desc="File"):
     # plt.clf()
 
     # # Plotting just the minus dataframe.
-    # plt.plot(minus_df.columns, minus_df.mean())
+    # plt.plot(minus_df.column, minus_df.mean())
     # plt.xticks(range(0, 2000, 200))
     # plt.xlabel("position in 2kbp promoter window")
     # plt.ylabel("averaged rna signal")
@@ -156,8 +156,8 @@ for file in tqdm(coverage_files, desc="File"):
     plt.plot(plus_df.columns, plus_df.mean())
     plt.plot(minus_df.columns, minus_df.mean())
     plt.xticks(range(0, 2000, 200))
-    plt.xlabel("position in 2kbp promoter window")
-    plt.ylabel("averaged rna signal")
-    plt.title(f"distribution of averaged rna signals for gm12878.minus.encff074sxq plus and minus strands", fontsize=8)
-    plt.savefig(f"./reu/plots/{file_name}.plus_minus.average_rna_signals.png")
+    plt.xlabel("Position in 2kbp Promoter Window")
+    plt.ylabel("Averaged Rna Signal")
+    plt.title(f"Distribution of Averaged RNA Signals for {file_name} Plus and Minus Strands", fontsize=8)
+    plt.savefig(f"./REU/plots/{file_name}.plus_minus.average_rna_signals.png")
     plt.clf()
