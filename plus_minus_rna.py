@@ -1,6 +1,4 @@
 import sys
-sys.path.append("/home/coder/diffTSS")
-
 import os
 from tqdm import tqdm
 import kipoiseq
@@ -8,132 +6,138 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import glob
+from multiprocessing import Pool
 from scripts.utils import FastaStringExtractor, one_hot_encode
 
-coverage_files = glob.glob1("/home/coder/data/RNASeq_bw", "*coverage.txt")
 
-# Generating the RNA signal line plot for each file, split into plus and minus dataframes.
-enhancer_gene_K562_100kb = pd.read_csv("/home/coder/data/K562_enhancer_gene_links_100kb.hg38.tsv", sep="\t")
-enhancer_gene_GM12878_100kb = pd.read_csv("/home/coder/data/GM12878_enhancer_gene_links_100kb.hg38.tsv", sep="\t")
+def process_gene(gene):
+    gene_df = gene_enhancer_table[gene_enhancer_table["ENSID"] == gene]
+    gene_enhancer_df = gene_df
 
-gene_K562_tss = pd.read_csv("/home/coder/data/ABC-multiTSS_nominated/K562/Neighborhoods/GeneList.txt", sep="\t")[['name', 'Ensembl_ID', 'chr', 'tss', 'strand', 'H3K27ac.RPM.TSS1Kb', 'DHS.RPM.TSS1Kb']]
-gene_GM12878_tss = pd.read_csv("/home/coder/data/ABC-multiTSS_nominated/GM12878/Neighborhoods/GeneList.txt", sep="\t")[['name', 'Ensembl_ID', 'chr', 'tss', 'strand', 'H3K27ac.RPM.TSS1Kb', 'DHS.RPM.TSS1Kb']]
+    plus_gene = plus[plus[3] == gene]
+    minus_gene = minus[minus[3] == gene]
 
-for file in tqdm(coverage_files, desc="File"):
-    cell_line = file[ :file.find(".")]
-    file_name = file[ :file.find("E") + 11]
-    enhancer_gene_100kb = None
-    gene_tss = None
+    # Promoter will be the first row, then enhancers will be sorted by distance from promoter (increasing).
+    gene_pe = gene_enhancer_df.sort_values(by="distance")
+    row_0 = gene_pe.iloc[0]
+    gene_ensid = row_0["TargetGeneEnsembl_ID"]
+    gene_name = row_0["TargetGene"]
+    gene_tss = row_0["TargetGeneTSS"]
+    chrom = row_0["chr"]
 
-    if cell_line == "K562":
-        enhancer_gene_100kb = enhancer_gene_K562_100kb
-        gene_tss = gene_K562_tss
-    elif cell_line == "GM12878":
-        enhancer_gene_100kb = enhancer_gene_GM12878_100kb
-        gene_tss = gene_GM12878_tss
+    if row_0["TargetGeneTSS"] != row_0["TargetGeneTSS"]:
+        gene_tss = row_0["tss"]
+        gene_name = row_0["name_gene"]
+        chrom = row_0["chr_gene"]
 
-    df = pd.read_csv(f"/home/coder/data/RNASeq_bw/{file}", sep="\t", skiprows=3)
-    df.columns = range(len(df.columns))
-    plus = df[df[5] == "+"]
-    minus = df[df[5] == "-"]
+    # Grabs the DNA sequence of our TSS interval.
+    max_seq_len = 2000
+    target_interval = kipoiseq.Interval(chrom, int(gene_tss - max_seq_len / 2), int(gene_tss + max_seq_len / 2))
+    promoter_seq = fasta_extractor.extract(target_interval)
+    promoter_code = one_hot_encode(promoter_seq)
 
-    gene_tss["ENSID"] = gene_tss["Ensembl_ID"]
-    enhancer_gene_100kb_includeNoEnhancerGene = enhancer_gene_100kb.merge(gene_tss, left_on="TargetGeneEnsembl_ID", right_on="Ensembl_ID", how="right", suffixes=["", "_gene"]).reset_index()
-    gene_list = list(gene_tss["ENSID"])
+    # Grabs the RNA signals from each promoter.
+    gene_len = row_0["end"] - row_0["start"]
+    plus_rna_signal = plus_gene[[9]]
+    plus_gene = plus_gene[(plus_gene[7] >= target_interval.start) & (plus_gene[8] <= target_interval.end)]
+    new_index = plus_gene[7].values - target_interval.start
+    plus_rna_signal = plus_rna_signal.set_index(new_index).reindex(list(range(0, max_seq_len)), fill_value=0)
+    plus_gene = np.array(plus_rna_signal).flatten()
 
-    gene_enhancer_table = enhancer_gene_100kb_includeNoEnhancerGene
-    rna_method = "encoding"
+    minus_rna_signal = minus_gene[[9]]
+    minus_gene = minus_gene[(minus_gene[7] >= target_interval.start) & (minus_gene[8] <= target_interval.end)]
+    new_index = minus_gene[7].values - target_interval.start
+    minus_rna_signal = minus_rna_signal.set_index(new_index).reindex(list(range(0, max_seq_len)), fill_value=0)
+    minus_gene = np.array(minus_rna_signal).flatten()
 
-    plus_df_list = []
-    minus_df_list = []
+    return plus_gene, minus_gene
+    #plus_df_list.append(plus_gene)
+    #minus_df_list.append(minus_gene)
 
-    for gene in tqdm(gene_list, desc="Gene"):
-        gene_df = gene_enhancer_table[gene_enhancer_table["ENSID"] == gene]
-        gene_enhancer_df = gene_df
+    
+    
+if __name__ == "__main__":    
 
-        if rna_method is not None:
-            if rna_method == "encoding" or rna_method == "one-hot":
-                plus_gene = plus[plus[3] == gene]
-                minus_gene = minus[minus[3] == gene]
-            if rna_method == "embedding":
-                plus_gene = plus[gene_list.index(gene)]
-                minus_gene = minus[gene_list.index(gene)]
+    coverage_files = glob.glob1("data/RNASeq_bw", "*coverage.txt")
+    
+    #print(f"Coverage files: {coverage_files}")
 
-            fasta_path = "/home/coder/data/hg38.fa"
-            fasta_extractor = FastaStringExtractor(fasta_path)
+    # Generating the RNA signal line plot for each file, split into plus and minus dataframes.
+    enhancer_gene_K562_100kb = pd.read_csv("data/K562_enhancer_gene_links_100kb.hg38.tsv", sep="\t")
+    enhancer_gene_GM12878_100kb = pd.read_csv("data/GM12878_enhancer_gene_links_100kb.hg38.tsv", sep="\t")
+    
+    #print("Enhancer Gene Links has been stored")
 
-            # Promoter will be the first row, then enhancers will be sorted by distance from promoter (increasing).
-            gene_pe = gene_enhancer_df.sort_values(by="distance")
-            row_0 = gene_pe.iloc[0]
-            gene_ensid = row_0["TargetGeneEnsembl_ID"]
-            gene_name = row_0["TargetGene"]
-            gene_tss = row_0["TargetGeneTSS"]
-            chrom = row_0["chr"]
+    gene_K562_tss = pd.read_csv("data/ABC-multiTSS_nominated/K562/Neighborhoods/GeneList.txt", sep="\t")[['name', 'Ensembl_ID', 'chr', 'tss', 'strand', 'H3K27ac.RPM.TSS1Kb', 'DHS.RPM.TSS1Kb']]
+    gene_GM12878_tss = pd.read_csv("data/ABC-multiTSS_nominated/GM12878/Neighborhoods/GeneList.txt", sep="\t")[['name', 'Ensembl_ID', 'chr', 'tss', 'strand', 'H3K27ac.RPM.TSS1Kb', 'DHS.RPM.TSS1Kb']]
 
-            if row_0["TargetGeneTSS"] != row_0["TargetGeneTSS"]:
-                gene_tss = row_0["tss"]
-                gene_name = row_0["name_gene"]
-                chrom = row_0["chr_gene"]
+    #print("Gene List has been stored")
+    
+    fasta_path = "data/hg38.fa"
+    fasta_extractor = FastaStringExtractor(fasta_path)
 
-            # Grabs the DNA sequence of our TSS interval.
-            max_seq_len = 2000
-            target_interval = kipoiseq.Interval(chrom, int(gene_tss - max_seq_len / 2), int(gene_tss + max_seq_len / 2))
-            promoter_seq = fasta_extractor.extract(target_interval)
-            promoter_code = one_hot_encode(promoter_seq)
+    for file in tqdm(coverage_files, desc="File"):
+        cell_line = file[ :file.find(".")]
+        file_name = file[ :file.find("E") + 11]
+        enhancer_gene_100kb = None
+        gene_tss = None
 
-            # Grabs the RNA signals from each enhancer.
-            if rna_method == "encoding" or rna_method == "one-hot":
-                gene_len = row_0["end"] - row_0["start"]
-                plus_rna_signal = plus_gene[[9]]
-                plus_gene = plus_gene[(plus_gene[7] >= target_interval.start) & (plus_gene[8] <= target_interval.end)]
-                new_index = plus_gene[7].values - target_interval.start
-                plus_rna_signal = plus_rna_signal.set_index(new_index).reindex(list(range(0, max_seq_len)), fill_value=0)
-                plus_gene = np.array(plus_rna_signal).flatten()
+        if cell_line == "K562":
+            enhancer_gene_100kb = enhancer_gene_K562_100kb
+            gene_tss = gene_K562_tss
+        elif cell_line == "GM12878":
+            enhancer_gene_100kb = enhancer_gene_GM12878_100kb
+            gene_tss = gene_GM12878_tss
 
-                minus_rna_signal = minus_gene[[9]]
-                minus_gene = minus_gene[(minus_gene[7] >= target_interval.start) & (minus_gene[8] <= target_interval.end)]
-                new_index = minus_gene[7].values - target_interval.start
-                minus_rna_signal = minus_rna_signal.set_index(new_index).reindex(list(range(0, max_seq_len)), fill_value=0)
-                minus_gene = np.array(minus_rna_signal).flatten()
+        df = pd.read_csv(f"data/RNASeq_bw/{file}", sep="\t", skiprows=3)
+        #print("RNASeq File has been stored")
+        df.columns = range(len(df.columns))
+        plus = df[df[5] == "+"]
+        minus = df[df[5] == "-"]
 
-            if rna_method == "embedding":
-                plus_gene = np.concatenate([plus_gene.reshape(1, 125), np.zeros([60, 125])])
+        gene_tss["ENSID"] = gene_tss["Ensembl_ID"]
+        enhancer_gene_100kb_includeNoEnhancerGene = enhancer_gene_100kb.merge(gene_tss, left_on="TargetGeneEnsembl_ID", right_on="Ensembl_ID", how="right", suffixes=["", "_gene"]).reset_index()
+        gene_list = list(gene_tss["ENSID"])
 
-                minus_gene = np.concatenate([minus_gene.reshape(1, 125), np.zeros([60, 125])])
-            
+        gene_enhancer_table = enhancer_gene_100kb_includeNoEnhancerGene
+        rna_method = "encoding"
+
+        plus_df_list = []
+        minus_df_list = []
+        total_df_list = []
+
+        #print("Beginning multiprocessing of genes...")
+
+        pool = Pool(processes=80)
+        for gene in tqdm(pool.imap(process_gene, gene_list), total=len(gene_list)):
+            plus_gene, minus_gene = gene
             plus_df_list.append(plus_gene)
             minus_df_list.append(minus_gene)
-    
-    plus_df = pd.DataFrame(plus_df_list)
-    minus_df = pd.DataFrame(minus_df_list)
 
-    plus_df.to_csv(f"/home/coder/REU/csvs/plus_minus_rna/{file_name}.plus_rna.csv")
-    minus_df.to_csv(f"/home/coder/REU/csvs/plus_minus_rna/{file_name}.minus_rna.csv")
+        plus_df = pd.DataFrame(plus_df_list)
+        minus_df = pd.DataFrame(minus_df_list)
+        total_df = plus_df + minus_df
 
-    # Plotting just the plus dataframe.
-    plt.plot(plus_df.columns, plus_df.mean())
-    plt.xticks(range(0, 2000, 200))
-    plt.xlabel("Position in 2Kbp Promoter Window")
-    plt.ylabel("Averaged RNA Signal")
-    plt.title(f"Distribution of Averaged RNA Signals for {file_name} Plus Strand", fontsize=8)
-    plt.savefig(f"/home/coder/REU/plots/{file_name}.plus.average_rna_signals.png")
-    plt.clf()
+        plus_df.to_csv(f"data/plots/coverage/{file_name}.plus_rna.csv", index=False, header=False)
+        minus_df.to_csv(f"data/plots/coverage/{file_name}.minus_rna.csv", index=False, header=False)
+        total_df.to_csv(f"data/plots/coverage/{file_name}.total_rna.csv", index=False, header=False)
 
-    # Plotting just the minus dataframe.
-    plt.plot(minus_df.columns, minus_df.mean())
-    plt.xticks(range(0, 2000, 200))
-    plt.xlabel("Position in 2Kbp Promoter Window")
-    plt.ylabel("Averaged RNA Signal")
-    plt.title(f"Distribution of Averaged RNA Signals for {file_name} Minus Strand", fontsize=8)
-    plt.savefig(f"/home/coder/REU/plots/{file_name}.minus.average_rna_signals.png")
-    plt.clf()
+        # Plotting just the both dataframes against each other.
+        plt.plot(plus_df.columns, plus_df.mean())
+        plt.plot(minus_df.columns, minus_df.mean())
+        plt.xticks(range(0, 2000, 200))
+        plt.xlabel("Position in 2Kbp Promoter Window")
+        plt.ylabel("Averaged RNA Signal")
+        plt.title(f"Distribution of Averaged RNA Signals for {file_name} Plus and Minus Strands", fontsize=8)
+        plt.savefig(f"data/plots/coverage/{file_name}.plus_minus.average_rna_signals.png")
+        plt.clf()
 
-    # Plotting just the both dataframes against each other.
-    plt.plot(plus_df.columns, plus_df.mean())
-    plt.plot(minus_df.columns, minus_df.mean())
-    plt.xticks(range(0, 2000, 200))
-    plt.xlabel("Position in 2Kbp Promoter Window")
-    plt.ylabel("Averaged RNA Signal")
-    plt.title(f"Distribution of Averaged RNA Signals for {file_name} Plus and Minus Strands", fontsize=8)
-    plt.savefig(f"/home/coder/REU/plots/{file_name}.plus_minus.average_rna_signals.png")
-    plt.clf()
+     
+        # Plotting just the both dataframes against each other.
+        plt.plot(total_df.columns, total_df.mean())
+        plt.xticks(range(0, 2000, 200))
+        plt.xlabel("Position in 2Kbp Promoter Window")
+        plt.ylabel("Averaged RNA Signal")
+        plt.title(f"Distribution of Averaged RNA Signals for {file_name}", fontsize=8)
+        plt.savefig(f"data/plots/coverage/{file_name}.average_rna_signals.png")
+        plt.clf()
