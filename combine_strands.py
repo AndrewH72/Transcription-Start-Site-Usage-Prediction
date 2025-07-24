@@ -64,8 +64,8 @@ for i in range(len(coverage_files) // 2):
         if strand_pairs[key_file_name] == value_file_name:
             # key_df = pd.read_csv(f"/home/coder/data-REU/{coverage_files[i]}", sep="\t")
             # value_df = pd.read_csv(f"/home/coder/data-REU/{coverage_files[j]}", sep="\t")
-            key_df = pd.DataFrame(pl.read_csv("/home/coder/data-REU/GM12878.minus.ENCFF074SXQ.coverage.txt", separator="\t", has_header=False))
-            value_df = pd.DataFrame(pl.read_csv("/home/coder/data-REU/GM12878.plus.ENCFF164VLA.coverage.txt", separator="\t", has_header=False))
+            key_df = pd.DataFrame(pl.read_csv(f"/home/coder/data-REU/{tab_files[i]}", separator="\t", has_header=False))
+            value_df = pd.DataFrame(pl.read_csv(f"/home/coder/data-REU/{tab_files[j]}", separator="\t", has_header=False))
 
             # Stack key_df and value_df on top of each other.
             stacked_df = pd.concat([key_df, value_df], ignore_index=True)
@@ -79,4 +79,4 @@ for i in range(len(coverage_files) // 2):
             # Merge left on the sum of the RNA signals.
             res_df = pd.merge(signal_df, sorted_df, on=[6, 7, 8, 9], how="left")
             res_df = res_df[[0, 1, 2, 3, 4, 5, 6, 7, 8, 9]]
-            res_df.to_csv(f"/home/coder/REU/stranded_files/{cell_line}.stranded.{value_file_name}.{key_file_name}.coverage.txt", sep="\t", index=False)
+            res_df.to_csv(f"/home/coder/REU/stranded_files/{cell_line}.stranded.{value_file_name}.{key_file_name}.coverage.txt", sep="\t", index=False, header=False)
